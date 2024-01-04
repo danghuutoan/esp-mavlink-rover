@@ -14,13 +14,42 @@
 #include "string.h"
 #include "driver/gpio.h"
 #include <mavlink.h>
+#include "driver/mcpwm.h"
+#include "soc/mcpwm_reg.h"
+#include "soc/mcpwm_struct.h"
+
+static const char *TAG = "example";
+
 static const int RX_BUF_SIZE = 2048;
+
+
 
 #define TXD_PIN (GPIO_NUM_17)
 #define RXD_PIN (GPIO_NUM_16)
+// Define the GPIO pins for the servos
+#define SERVO_GPIO_PIN_1 0
+#define SERVO_GPIO_PIN_2 2
+
+// Define MCPWM configurations for each servo
+mcpwm_config_t pwm_config_1 = {
+    .frequency = 50,             // Set PWM frequency to 50Hz for servo control
+    .cmpr_a = 0,
+    .cmpr_b = 0,
+    .counter_mode = MCPWM_UP_COUNTER,
+    .duty_mode = MCPWM_DUTY_MODE_0,
+};
+
+mcpwm_config_t pwm_config_2 = {
+    .frequency = 50,             // Set PWM frequency to 50Hz for servo control
+    .cmpr_a = 0,
+    .cmpr_b = 0,
+    .counter_mode = MCPWM_UP_COUNTER,
+    .duty_mode = MCPWM_DUTY_MODE_0,
+};
 
 void init(void)
 {
+
     const uart_config_t uart_config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -64,9 +93,22 @@ static void rx_task(void *arg)
     uint8_t *data = (uint8_t *)malloc(RX_BUF_SIZE + 1);
     unsigned int temp = 0;
     int i = 0;
+    // Configure MCPWM for servo 1
+    mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0A, SERVO_GPIO_PIN_1);
+    mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_0, &pwm_config_1);
+
+    // Configure MCPWM for servo 2
+    mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM1A, SERVO_GPIO_PIN_2);
+    mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_1, &pwm_config_2);
+
+
+    mcpwm_set_duty_in_us(MCPWM_UNIT_0, MCPWM_TIMER_0, MCPWM_OPR_A, 1500); // Set position for 0 degrees
+                        
+    mcpwm_set_duty_in_us(MCPWM_UNIT_0, MCPWM_TIMER_1, MCPWM_OPR_A, 1500); // Set position for 0 degrees
+   
     while (1)
     {
-        const int rxBytes = uart_read_bytes(UART_NUM_1, data, RX_BUF_SIZE, 1000 / portTICK_PERIOD_MS);
+        const int rxBytes = uart_read_bytes(UART_NUM_1, data, RX_BUF_SIZE, 10 / portTICK_PERIOD_MS);
         if (rxBytes > 0)
         {
             // if (mavlink_parse_char(chan, data[0], &msg, &status))
@@ -88,7 +130,7 @@ static void rx_task(void *arg)
                 if (mavlink_parse_char(MAVLINK_COMM_0, data[i], &msg, &status))
                 {
                     // Packet received
-                    ESP_LOGI(RX_TASK_TAG, "\nReceived packet: SYS: %d, COMP: %d, LEN: %d, MSG ID: %d\n", msg.sysid, msg.compid, msg.len, msg.msgid);
+                    // ESP_LOGI(RX_TASK_TAG, "\nReceived packet: SYS: %d, COMP: %d, LEN: %d, MSG ID: %d\n", msg.sysid, msg.compid, msg.len, msg.msgid);
                     switch (msg.msgid)
                     {
                     case MAVLINK_MSG_ID_RC_CHANNELS_OVERRIDE: // #70
@@ -96,11 +138,20 @@ static void rx_task(void *arg)
                         mavlink_rc_channels_override_t ov_chs;
                         mavlink_msg_rc_channels_override_decode(&msg, &ov_chs);
                         ESP_LOGI(RX_TASK_TAG, "chan1: %d ", ov_chs.chan1_raw);
-                        ESP_LOGI(RX_TASK_TAG, "chan2: %d", ov_chs.chan2_raw);
-                        ESP_LOGI(RX_TASK_TAG, "chan3: %d", ov_chs.chan3_raw);
-                        ESP_LOGI(RX_TASK_TAG, "chan4: %d", ov_chs.chan4_raw);
+                        // ESP_LOGI(RX_TASK_TAG, "chan2: %d", ov_chs.chan2_raw);
+                        // ESP_LOGI(RX_TASK_TAG, "chan3: %d", ov_chs.chan3_raw);
+                        // ESP_LOGI(RX_TASK_TAG, "chan4: %d", ov_chs.chan4_raw);
                         ESP_LOGI(RX_TASK_TAG, "chan5: %d", ov_chs.chan5_raw);
-                    }
+                        int speed = ov_chs.chan5_raw;
+                        if (speed < 1500 && speed > 1310)
+                        {
+                            speed = 1350;
+                        }
+                        mcpwm_set_duty_in_us(MCPWM_UNIT_0, MCPWM_TIMER_0, MCPWM_OPR_A, speed); // Set position for 0 degrees
+                        
+                        mcpwm_set_duty_in_us(MCPWM_UNIT_0, MCPWM_TIMER_1, MCPWM_OPR_A, ov_chs.chan1_raw); // Set position for 0 degrees
+                        // int value =
+                                        }
                     }
                 }
             }
